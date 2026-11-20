@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проверка КС-2 со сметой</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .drag-drop-zone {
+            border: 2px dashed #cbd5e1;
+            border-radius: 0.5rem;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .drag-drop-zone:hover, .drag-drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #bfdbfe;
+        }
+        
+        .status-ok { background-color: #dcfce7; color: #166534; }
+        .status-warning { background-color: #fef3c7; color: #92400e; }
+        .status-error { background-color: #fecaca; color: #b91c1c; }
+        
+        .zebra-striped tbody tr:nth-child(odd) {
+            background-color: #f8fafc;
+        }
+        
+        .zebra-striped tbody tr:nth-child(even) {
+            background-color: #f1f5f9;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: 500;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transform: translateX(150%);
+            transition: transform 0.3s ease;
+            z-index: 10000;
+        }
+        
+        .toast.show {
+            transform: translateX(0);
+        }
+        
+        .toast.success { background-color: #10b981; }
+        .toast.error { background-color: #ef4444; }
+        .toast.info { background-color: #3b82f6; }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            display: none;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid #3b82f6;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Компактная таблица результатов - адаптивная, без скроллов */
+        #resultsTable {
+            font-size: 0.75rem;
+            table-layout: auto; /* Автоматическая ширина колонок */
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            border-collapse: collapse;
+        }
+        
+        #resultsTable th,
+        #resultsTable td {
+            padding: 0.3rem 0.5rem;
+            border: 1px solid #d1d5db;
+        }
+        
+        #resultsTable th {
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        /* Числовые данные - без переноса, в одну строку, видимые */
+        #resultsTable td[style*="text-right"],
+        #resultsTable td.text-right {
+            white-space: nowrap !important;
+            overflow: visible !important;
+            text-overflow: clip;
+            min-width: fit-content;
+        }
+        
+        /* Убеждаемся, что все числовые ячейки видны */
+        #resultsTable td {
+            overflow: visible !important;
+        }
+        
+        /* Текстовые данные - с переносом, но ограниченной высотой */
+        #resultsTable td[style*="word-wrap"],
+        #resultsTable td.text-left:not([style*="whitespace-nowrap"]) {
+            word-wrap: break-word;
+            white-space: normal;
+            overflow-wrap: break-word;
+            max-height: 4em; /* Ограничиваем высоту ячейки */
+            overflow: visible;
+        }
+        
+        /* Контейнер таблицы - адаптивный, без скроллов, на всю ширину */
+        #resultsSection {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+            box-sizing: border-box;
+            margin: 0;
+        }
+        
+        /* Контейнер карточки с таблицей - на всю ширину */
+        #resultsSection > div.bg-white {
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box;
+            margin-left: 0;
+            margin-right: 0;
+        }
+        
+        /* Контейнер div с таблицей внутри карточки */
+        #resultsSection > div.bg-white > div:last-child > div {
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box;
+        }
+        
+        /* Обеспечиваем, что таблица помещается на страницу */
+        body {
+            overflow-x: hidden;
+            width: 100%;
+        }
+        
+        .container {
+            max-width: 100%;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        /* Адаптивные размеры шрифта для разных экранов */
+        @media (max-width: 1920px) {
+            #resultsTable {
+                font-size: 0.7rem;
+            }
+            #resultsTable th,
+            #resultsTable td {
+                padding: 0.25rem 0.4rem;
+            }
+        }
+        
+        @media (max-width: 1600px) {
+            #resultsTable {
+                font-size: 0.65rem;
+            }
+            #resultsTable th,
+            #resultsTable td {
+                padding: 0.2rem 0.35rem;
+            }
+        }
+        
+        @media (max-width: 1400px) {
+            #resultsTable {
+                font-size: 0.6rem;
+            }
+            #resultsTable th {
+                font-size: 0.65rem;
+            }
+            #resultsTable th,
+            #resultsTable td {
+                padding: 0.15rem 0.3rem;
+            }
+        }
+        
+        @media (max-width: 1200px) {
+            #resultsTable {
+                font-size: 0.55rem;
+            }
+            #resultsTable th,
+            #resultsTable td {
+                padding: 0.1rem 0.25rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+    
+    <!-- Toast Notifications -->
+    <div id="toastContainer"></div>
+    
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2 bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
+                Проверка КС-2 со сметой
+            </h1>
+            <p class="text-gray-600">Загрузите файлы сметы и КС-2 для автоматической проверки соответствия</p>
+        </header>
+        
+        <div class="max-w-4xl mx-auto mb-10">
+            <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Загрузка файлов</h2>
+                    <button id="shutdownBtn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
+                        Завершить процесс
+                    </button>
+                </div>
+                
+                <form id="uploadForm" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Файл сметы (.xlsx)</label>
+                            <div id="smetaDropZone" class="drag-drop-zone">
+                                <div class="mb-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                </div>
+                                <p class="text-gray-600">Перетащите файл сюда или нажмите для выбора</p>
+                                <input type="file" id="smetaFile" name="smeta_file" accept=".xlsx,.xls" class="hidden" required>
+                            </div>
+                            <div id="smetaFileName" class="mt-2 text-sm text-gray-500"></div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Файл КС-2 (.xlsx)</label>
+                            <div id="ks2DropZone" class="drag-drop-zone">
+                                <div class="mb-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                </div>
+                                <p class="text-gray-600">Перетащите файл сюда или нажмите для выбора</p>
+                                <input type="file" id="ks2File" name="ks2_file" accept=".xlsx,.xls" class="hidden" required>
+                            </div>
+                            <div id="ks2FileName" class="mt-2 text-sm text-gray-500"></div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" id="validateBtn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Проверить соответствие
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Results Section (Initially Hidden) - на всю ширину -->
+        <div id="resultsSection" class="hidden w-full">
+                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Сводка результатов</h2>
+                    <div id="summaryContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+                </div>
+                
+                <div class="bg-white rounded-xl shadow-md p-4 mb-6" style="width: 100%; max-width: 100%; margin: 0; box-sizing: border-box;">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4 sm:mb-0">Детальные результаты проверки</h2>
+                        <div class="flex space-x-3">
+                            <button id="exportBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Экспорт в Excel
+                            </button>
+                            <button id="clearBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                                Очистить
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div style="width: 100%; max-width: 100%; overflow-x: visible; box-sizing: border-box;">
+                        <table id="resultsTable" class="w-full divide-y divide-gray-200 zebra-striped border-collapse" style="table-layout: auto; width: 100% !important; min-width: 100% !important; max-width: 100% !important;">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th rowspan="2" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">№<br>КС-2</th>
+                                    <th rowspan="2" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">№<br>сметы</th>
+                                    <th rowspan="2" class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">Наименование</th>
+                                    <th rowspan="2" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">Обоснование</th>
+                                    <th rowspan="2" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">Ед.</th>
+                                    <th colspan="3" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #e3f2fd;">Количество</th>
+                                    <th colspan="3" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #fff3e0;">Цена, руб.</th>
+                                    <th colspan="3" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #f1f8e9;">Стоимость, руб.</th>
+                                    <th rowspan="2" class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="vertical-align: middle;">Статус</th>
+                                </tr>
+                                <tr>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #e3f2fd;">Смета</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #e3f2fd;">КС-2</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #e3f2fd;">Остаток</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #fff3e0;">Смета</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #fff3e0;">КС-2</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #fff3e0;">Разн.</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #f1f8e9;">Смета</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #f1f8e9;">КС-2</th>
+                                    <th class="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300" style="background: #f1f8e9;">Остаток</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody" class="bg-white divide-y divide-gray-200">
+                                <!-- Results will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div id="recommendationsSection" class="bg-white rounded-xl shadow-md p-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Рекомендации</h2>
+                    <div id="recommendationsContainer" class="space-y-4">
+                        <!-- Recommendations will be inserted here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="text-center text-gray-500 text-sm mt-10">
+            <p>Система проверки КС-2 со сметой • Версия 2.0</p>
+        </footer>
+    </div>
+
+    <script>
+        // DOM Elements
+        const smetaDropZone = document.getElementById('smetaDropZone');
+        const ks2DropZone = document.getElementById('ks2DropZone');
+        const smetaFileInput = document.getElementById('smetaFile');
+        const ks2FileInput = document.getElementById('ks2File');
+        const smetaFileName = document.getElementById('smetaFileName');
+        const ks2FileName = document.getElementById('ks2FileName');
+        const uploadForm = document.getElementById('uploadForm');
+        const validateBtn = document.getElementById('validateBtn');
+        const resultsSection = document.getElementById('resultsSection');
+        const summaryContainer = document.getElementById('summaryContainer');
+        const resultsBody = document.getElementById('resultsBody');
+        const exportBtn = document.getElementById('exportBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const recommendationsContainer = document.getElementById('recommendationsContainer');
+        const shutdownBtn = document.getElementById('shutdownBtn');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const toastContainer = document.getElementById('toastContainer');
+        
+        let currentResults = [];
+        
+        // File name display
+        smetaFileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                smetaFileName.textContent = this.files[0].name;
+            }
+        });
+        
+        ks2FileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                ks2FileName.textContent = this.files[0].name;
+            }
+        });
+        
+        // Drag and drop functionality
+        [smetaDropZone, ks2DropZone].forEach(dropZone => {
+            const fileInput = dropZone.querySelector('input[type="file"]');
+            
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+            
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+            
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                
+                if (e.dataTransfer.files.length > 0) {
+                    fileInput.files = e.dataTransfer.files;
+                    const fileName = e.dataTransfer.files[0].name;
+                    if (dropZone === smetaDropZone) {
+                        smetaFileName.textContent = fileName;
+                    } else {
+                        ks2FileName.textContent = fileName;
+                    }
+                }
+            });
+            
+            dropZone.addEventListener('click', () => {
+                fileInput.click();
+            });
+        });
+        
+        // Show loading overlay
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+        
+        // Hide loading overlay
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+        
+        // Show toast notification
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type} show`;
+            toast.textContent = message;
+            
+            toastContainer.appendChild(toast);
+            
+            // Auto hide after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode === toastContainer) {
+                        toastContainer.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
+        
+        // Format number with spaces as thousand separators
+        function formatNumber(num) {
+            if (typeof num !== 'number' || isNaN(num)) return '-';
+            return num.toLocaleString('ru-RU', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+        
+        // Format number with fixed decimal places and thousand separators
+        function formatFixed(num, decimals = 2) {
+            if (typeof num !== 'number' || isNaN(num)) return '-';
+            // Используем toLocaleString для добавления разделителей разрядов (пробелы для тысяч)
+            return num.toLocaleString('ru-RU', {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+        }
+        
+        // Get status class
+        function getStatusClass(status) {
+            if (status.includes('OK') || status.includes('Соответствует') || status.includes('Экономия')) return 'status-ok';
+            if (status.includes('Ошибка') || status.includes('Не найдено') || status.includes('Несоответствие') || status.includes('Превышение')) return 'status-error';
+            if (status.includes('Предупреждение') || status.includes('Warning')) return 'status-warning';
+            return '';
+        }
+        
+        // Display summary
+        function displaySummary(summary) {
+            console.log('Summary data:', summary); // Отладка
+            const total = summary.total || 0;
+            const errors = summary.errors || 0;
+            const ok = summary.ok || 0;
+            const warnings = summary.warnings || 0;
+            const success = ok + warnings;
+            
+            summaryContainer.innerHTML = `
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-bold text-gray-800 mb-1">Всего позиций</h3>
+                    <p class="text-3xl font-bold text-blue-600">${total}</p>
+                </div>
+                <div class="bg-red-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-bold text-gray-800 mb-1">Ошибок</h3>
+                    <p class="text-3xl font-bold text-red-600">${errors}</p>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-bold text-gray-800 mb-1">Успешно / Экономия</h3>
+                    <p class="text-3xl font-bold text-green-600">${success}</p>
+                </div>
+            `;
+        }
+        
+        // Display results table
+        function displayResults(results) {
+            console.log('Display results:', results); // Отладка
+            resultsBody.innerHTML = '';
+            currentResults = results;
+            
+            if (!results || results.length === 0) {
+                console.warn('No results to display');
+                return;
+            }
+            
+            results.forEach((result, index) => {
+                const row = document.createElement('tr');
+                const statusText = result.issue_type_name === 'OK' ? 'OK' : result.message;
+                row.className = getStatusClass(statusText);
+                
+                // Получаем данные позиций
+                const ks2Pos = result.ks2_pos || {};
+                const smetaPos = result.smeta_pos || {};
+                
+                // Отладка для первых 3 позиций
+                if (index < 3) {
+                    console.log(`Result ${index}:`, result);
+                    console.log(`  KS2 pos:`, ks2Pos);
+                    console.log(`  Smeta pos:`, smetaPos);
+                    console.log(`  Smeta quantity:`, smetaPos.quantity, typeof smetaPos.quantity);
+                    console.log(`  Smeta price:`, smetaPos.price, typeof smetaPos.price);
+                    console.log(`  Smeta cost:`, smetaPos.cost, typeof smetaPos.cost);
+                }
+                
+                // Вычисляем разницы: смета - КС-2 (смета является эталоном)
+                // ВАЖНО: Проверяем, что данные из сметы доступны (не null и не undefined)
+                const hasSmetaData = smetaPos && 
+                    smetaPos.quantity !== null && smetaPos.quantity !== undefined &&
+                    smetaPos.price !== null && smetaPos.price !== undefined &&
+                    smetaPos.cost !== null && smetaPos.cost !== undefined;
+                
+                if (!hasSmetaData && index < 3) {
+                    console.warn(`Smeta data missing or incomplete for result ${index}:`, {
+                        smetaPos,
+                        hasQuantity: smetaPos.quantity !== null && smetaPos.quantity !== undefined,
+                        hasPrice: smetaPos.price !== null && smetaPos.price !== undefined,
+                        hasCost: smetaPos.cost !== null && smetaPos.cost !== undefined
+                    });
+                }
+                
+                // Положительная разница = смета больше КС-2 (хорошо, экономия)
+                // Отрицательная разница = смета меньше КС-2 (плохо, превышение)
+                const smetaQty = (hasSmetaData && smetaPos.quantity !== null) ? parseFloat(smetaPos.quantity) : 0;
+                const ks2Qty = (ks2Pos.quantity !== null && ks2Pos.quantity !== undefined) ? parseFloat(ks2Pos.quantity) : 0;
+                const quantityDiff = smetaQty - ks2Qty;
+                
+                const smetaPr = (hasSmetaData && smetaPos.price !== null) ? parseFloat(smetaPos.price) : 0;
+                const ks2Pr = (ks2Pos.price !== null && ks2Pos.price !== undefined) ? parseFloat(ks2Pos.price) : 0;
+                const priceDiff = smetaPr - ks2Pr;
+                
+                const smetaCst = (hasSmetaData && smetaPos.cost !== null) ? parseFloat(smetaPos.cost) : 0;
+                const ks2Cst = (ks2Pos.cost !== null && ks2Pos.cost !== undefined) ? parseFloat(ks2Pos.cost) : 0;
+                const costDiff = smetaCst - ks2Cst;
+                
+                // Форматируем значения
+                const smetaQuantity = hasSmetaData ? formatFixed(smetaQty, 4) : '-';
+                const ks2Quantity = formatFixed(ks2Qty, 4);
+                const quantityDiffFormatted = hasSmetaData ? formatFixed(quantityDiff, 4) : '-';
+                
+                const smetaPrice = hasSmetaData ? formatFixed(smetaPr, 2) : '-';
+                const ks2Price = formatFixed(ks2Pr, 2);
+                const priceDiffFormatted = hasSmetaData ? formatFixed(priceDiff, 2) : '-';
+                
+                const smetaCost = hasSmetaData ? formatFixed(smetaCst, 2) : '-';
+                const ks2Cost = formatFixed(ks2Cst, 2);
+                const costDiffFormatted = hasSmetaData ? formatFixed(costDiff, 2) : '-';
+                
+                // Определяем цвет для разниц:
+                // Положительная разница (смета > КС-2) = зеленый (экономия, хорошо)
+                // Отрицательная разница (смета < КС-2) = красный (превышение, плохо)
+                // Нулевая разница = серый (OK)
+                const getDiffClass = (diff) => {
+                    if (diff === '-' || diff === '0.00' || diff === '0.0000') return 'text-gray-600';
+                    const numDiff = parseFloat(diff);
+                    if (numDiff > 0.01) return 'text-green-600 font-bold'; // Экономия
+                    if (numDiff < -0.01) return 'text-red-600 font-bold'; // Превышение
+                    return 'text-gray-600'; // OK
+                };
+                
+                row.innerHTML = `
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-center text-xs">${ks2Pos.number || '-'}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-center text-xs">${ks2Pos.smeta_number || '-'}</td>
+                    <td class="px-1 py-1 border border-gray-300 text-xs" title="${ks2Pos.name || ''}" style="word-wrap: break-word; white-space: normal;">${ks2Pos.name || '-'}</td>
+                    <td class="px-1 py-1 border border-gray-300 text-center text-xs" style="word-wrap: break-word; white-space: normal;">${ks2Pos.justification || '-'}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-center text-xs">${ks2Pos.unit || '-'}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #e3f2fd;">${smetaQuantity}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #e3f2fd;">${ks2Quantity}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs font-medium ${getDiffClass(quantityDiffFormatted)}" style="background: #e3f2fd;">${quantityDiffFormatted}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #fff3e0;">${smetaPrice}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #fff3e0;">${ks2Price}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs font-medium ${getDiffClass(priceDiffFormatted)}" style="background: #fff3e0;">${priceDiffFormatted}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #f1f8e9;">${smetaCost}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs" style="background: #f1f8e9;">${ks2Cost}</td>
+                    <td class="px-1 py-1 whitespace-nowrap border border-gray-300 text-right text-xs font-medium ${getDiffClass(costDiffFormatted)}" style="background: #f1f8e9;">${costDiffFormatted}</td>
+                    <td class="px-1 py-1 border border-gray-300 text-xs font-medium" title="${statusText}" style="word-wrap: break-word; white-space: normal;">${statusText}</td>
+                `;
+                
+                resultsBody.appendChild(row);
+            });
+        }
+        
+        // Display recommendations
+        function displayRecommendations(recommendations) {
+            recommendationsContainer.innerHTML = '';
+            
+            if (!recommendations || recommendations.length === 0) {
+                recommendationsContainer.innerHTML = '<p class="text-gray-500">Рекомендации отсутствуют</p>';
+                return;
+            }
+            
+            recommendations.forEach(rec => {
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-lg border-l-4 ${
+                    rec.severity === 'error' ? 'border-red-500 bg-red-50' :
+                    rec.severity === 'warning' ? 'border-yellow-500 bg-yellow-50' :
+                    'border-green-500 bg-green-50'
+                }`;
+                
+                let icon = '';
+                if (rec.severity === 'error') {
+                    icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>';
+                } else if (rec.severity === 'warning') {
+                    icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-500 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>';
+                } else {
+                    icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+                }
+                
+                let itemsHtml = '';
+                if (rec.items && rec.items.length > 0) {
+                    rec.items.forEach(item => {
+                        itemsHtml += `<li class="ml-6 mt-1 text-gray-700">${item}</li>`;
+                    });
+                } else if (rec.message) {
+                    itemsHtml = `<p class="text-gray-700">${rec.message}</p>`;
+                }
+                
+                card.innerHTML = `
+                    <h3 class="font-bold text-lg mb-2">${icon} ${rec.title || rec.message || 'Рекомендация'}</h3>
+                    ${itemsHtml ? `<ul class="list-disc">${itemsHtml}</ul>` : ''}
+                `;
+                
+                recommendationsContainer.appendChild(card);
+            });
+        }
+        
+        // Form submission
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Validate form
+            if (!smetaFileInput.files.length || !ks2FileInput.files.length) {
+                showToast('Пожалуйста, выберите оба файла', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('smeta_file', smetaFileInput.files[0]);
+            formData.append('ks2_file', ks2FileInput.files[0]);
+            
+            showLoading();
+            validateBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/validate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Ошибка при проверке файлов');
+                }
+                
+                // Display results
+                displaySummary(data.summary);
+                displayResults(data.results);
+                displayRecommendations(data.recommendations || []);
+                
+                // Show results section
+                resultsSection.classList.remove('hidden');
+                
+                showToast('Проверка успешно выполнена!', 'success');
+            } catch (error) {
+                console.error('Error:', error);
+                showToast(`Ошибка: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+                validateBtn.disabled = false;
+            }
+        });
+        
+        // Export to Excel
+        exportBtn.addEventListener('click', async () => {
+            if (currentResults.length === 0) {
+                showToast('Нет данных для экспорта. Сначала выполните проверку.', 'error');
+                return;
+            }
+            
+            showLoading();
+            exportBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ results: currentResults })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Ошибка при экспорте в Excel');
+                }
+                
+                // Trigger file download
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ks2_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showToast('Отчет успешно экспортирован!', 'success');
+            } catch (error) {
+                console.error('Export Error:', error);
+                showToast(`Ошибка экспорта: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+                exportBtn.disabled = false;
+            }
+        });
+        
+        // Clear results
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Вы уверены, что хотите очистить все данные и начать новую проверку?')) {
+                resultsSection.classList.add('hidden');
+                smetaFileInput.value = '';
+                ks2FileInput.value = '';
+                smetaFileName.textContent = '';
+                ks2FileName.textContent = '';
+                resultsBody.innerHTML = '';
+                summaryContainer.innerHTML = '';
+                recommendationsContainer.innerHTML = '';
+                currentResults = [];
+                showToast('Данные очищены', 'info');
+            }
+        });
+        
+        // Shutdown server
+        shutdownBtn.addEventListener('click', async () => {
+            if (!confirm('Вы уверены, что хотите завершить процесс? Сервер будет остановлен.')) {
+                return;
+            }
+            
+            showLoading();
+            
+            try {
+                const response = await fetch('/api/shutdown', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка при остановке сервера');
+                }
+                
+                showToast('Сервер будет остановлен. Страница закроется через 3 секунды...', 'info');
+                
+                // Close the window after 3 seconds
+                setTimeout(() => {
+                    window.close();
+                }, 3000);
+            } catch (error) {
+                console.error('Shutdown Error:', error);
+                showToast(`Ошибка остановки: ${error.message}`, 'error');
+                hideLoading();
+            }
+        });
+        
+        // Auto close window on beforeunload if server is shutting down
+        let isShuttingDown = false;
+        window.addEventListener('beforeunload', (e) => {
+            if (isShuttingDown) {
+                return;
+            }
+            
+            // Send shutdown request when closing window
+            fetch('/api/shutdown', {
+                method: 'POST',
+                keepalive: true
+            }).catch(() => {
+                // Ignore errors during shutdown
+            });
+        });
+    </script>
+</body>
+</html>
+
